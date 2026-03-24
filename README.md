@@ -36,7 +36,7 @@ zig build test
 zig build qemu
 ```
 
-## 阶段三 / 四（相对 [ideas/idea1.md](ideas/idea1.md)）
+## 阶段三 / 四
 
 - **阶段三**：在 `src/sel4/**` 用 Zig 表达内核子系统骨架与桩；与官方 `syscall.c`、`boot.c` 等 **一一对照**，由 `upstream_*` 标路径。
 - **阶段四**：`model/capability.zig`、`mm/phys_region.zig`、`arch/x86_64/idt.zig` 等。
