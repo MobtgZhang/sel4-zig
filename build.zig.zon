@@ -1,0 +1,21 @@
+.{
+    .name = .sel4_zig,
+    .version = "0.0.0",
+    .fingerprint = 0x18052d582f3e7da9,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        "Makefile",
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+        "cmake",
+        "src",
+        "scripts",
+        "include",
+        "linker",
+        "tools",
+        "docs",
+        "vendor",
+    },
+}
