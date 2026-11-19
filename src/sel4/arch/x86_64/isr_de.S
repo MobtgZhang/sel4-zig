@@ -1,4 +1,4 @@
-/* x86_64 #DE 处理：由 Zig 导出 onDivideError */
+/* x86-64 divide exception: call the Zig onDivideError export. */
         .section .text
         .code64
         .global isr_divide_error

@@ -1,19 +1,17 @@
-//! COM1 串口输出（裸机与 `kernel_init` 共用，避免与 `kmain` 循环依赖）。
+//! COM1 serial output shared by the boot entry and exception diagnostics.
 fn outb(port: u16, value: u8) void {
     asm volatile ("outb %[v], %[p]"
         :
         : [v] "{al}" (value),
           [p] "{dx}" (port),
-        : .{ .memory = true }
-    );
+        : .{ .memory = true });
 }
 
 fn inb(port: u16) u8 {
     return asm volatile ("inb %[p], %[v]"
         : [v] "={al}" (-> u8),
         : [p] "{dx}" (port),
-        : .{ .memory = true }
-    );
+        : .{ .memory = true });
 }
 
 fn serialWriteByte(byte: u8) void {
@@ -28,4 +26,19 @@ fn serialWriteByte(byte: u8) void {
 
 pub fn serialWriteSlice(msg: []const u8) void {
     for (msg) |c| serialWriteByte(c);
+}
+
+/// Configure COM1 for 115200 baud, 8 data bits, no parity, one stop bit.
+pub fn init() void {
+    outb(0x3f9, 0);
+    outb(0x3fb, 0x80);
+    outb(0x3f8, 1);
+    outb(0x3f9, 0);
+    outb(0x3fb, 3);
+    outb(0x3fa, 0xc7);
+    outb(0x3fc, 3);
+}
+pub fn serialReadByte() ?u8 {
+    if (inb(0x3fd) & 1 == 0) return null;
+    return inb(0x3f8);
 }

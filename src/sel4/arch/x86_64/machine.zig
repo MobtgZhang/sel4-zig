@@ -1,5 +1,5 @@
-//! 阶段三优先级 1：原 `machine.c` 在现网 seL4 x86 上拆在 `machine/*.c`；此处用 Zig 实现**无状态寄存器原语**。
-//! 复杂设备/平台逻辑仍以镜像 C 为准：`seL4/src/arch/x86/machine/`。
+//! Privileged x86-64 register primitives.
+//! Device initialization is owned by the platform implementation.
 const builtin = @import("builtin");
 
 comptime {
@@ -60,6 +60,5 @@ pub fn writeCr3(value: u64) void {
     asm volatile ("mov %[v], %%cr3"
         :
         : [v] "r" (value),
-        : .{ .memory = true }
-    );
+        : .{ .memory = true });
 }

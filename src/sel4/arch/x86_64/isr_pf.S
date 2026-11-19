@@ -1,4 +1,4 @@
-/* x86_64 #PF：错误码在栈顶，经 rdi/rsi 传入 Zig */
+/* x86-64 page fault: pass the error code and fault address to Zig. */
         .section .text
         .code64
         .global isr_page_fault

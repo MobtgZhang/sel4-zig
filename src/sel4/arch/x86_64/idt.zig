@@ -1,4 +1,4 @@
-//! 阶段四 4.3：x86_64 IDT 表项布局（与 Intel SDM / 上游陷阱入口配合使用）。
+//! Intel x86-64 interrupt descriptor table layout.
 const std = @import("std");
 
 pub const IdtEntry = packed struct {
@@ -16,7 +16,7 @@ pub const IdtEntry = packed struct {
     pub const gate_interrupt: u4 = 0xE;
     pub const gate_trap: u4 = 0xF;
 
-    /// 填充 64 位中断/陷阱门描述符（offset 为内核代码段内线性地址）。
+    /// Build a present interrupt gate at the supplied code-segment offset.
     pub fn initInterruptGate(code_selector: u16, offset: u64, dpl_bits: u2) IdtEntry {
         return .{
             .offset_low = @truncate(offset),
