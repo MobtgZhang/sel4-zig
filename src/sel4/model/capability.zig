@@ -1,88 +1,92 @@
-//! 阶段四 4.1：与上游生成 `structures_gen.h` 中 `cap_t`（`uint64_t words[2]`，类型域在 word0 位 59–63）对齐。
-//! 高层 `Capability` 仍为 Zig 表达；低层布局用 `CapRaw` + `capType`。
+//! Capability rights, badge derivation, and object identity.
+//! Reference: src/object/objecttype.c and include/object/structures_64.bf.
 const std = @import("std");
+const s = @import("structures.zig");
+pub const Capability = s.Capability;
+pub const Rights = s.Rights;
+pub const Slot = s.Slot;
+pub const CNodeCap = s.CNodeCap;
 
-pub const UntypedCap = struct { bits: u128 };
-pub const EndpointCap = struct { bits: u128 };
-pub const TcbCap = struct { bits: u128 };
-pub const CNodeCap = struct { bits: u128 };
-pub const FrameCap = struct { bits: u128 };
-pub const PageTableCap = struct { bits: u128 };
-pub const NotificationCap = struct { bits: u128 };
-pub const ReplyCap = struct { bits: u128 };
-pub const IrqHandlerCap = struct { bits: u128 };
-
-pub const Capability = union(enum) {
-    null_cap: void,
-    untyped: UntypedCap,
-    endpoint: EndpointCap,
-    tcb: TcbCap,
-    cnode: CNodeCap,
-    frame: FrameCap,
-    page_table: PageTableCap,
-    notification: NotificationCap,
-    reply: ReplyCap,
-    irq_handler: IrqHandlerCap,
-
-    pub fn isValid(self: Capability) bool {
-        return self != .null_cap;
+pub fn maskRights(cap: Capability, rights: Rights) Capability {
+    var result = cap;
+    switch (result) {
+        .endpoint => |*c| c.rights = c.rights.intersect(rights),
+        .notification => |*c| c.rights = c.rights.intersect(rights),
+        .frame => |*c| c.rights = c.rights.intersect(rights),
+        else => {},
     }
-};
-
-/// 与 `struct cap { uint64_t words[2]; }` 一致。
-pub const CapRaw = extern struct {
-    words: [2]u64,
-
-    pub fn capType(self: CapRaw) u5 {
-        return @truncate(self.words[0] >> 59);
-    }
-
-    pub fn nullCap() CapRaw {
-        return .{ .words = .{ 0, 0 } };
-    }
-};
-
-/// 与 `build-sel4-zig/generated/arch/object/structures_gen.h` 中 `enum cap_tag` 数值一致（节选）。
-pub const cap_null_cap: u5 = 0;
-pub const cap_frame_cap: u5 = 1;
-pub const cap_untyped_cap: u5 = 2;
-pub const cap_page_table_cap: u5 = 3;
-pub const cap_endpoint_cap: u5 = 4;
-pub const cap_page_directory_cap: u5 = 5;
-pub const cap_notification_cap: u5 = 6;
-pub const cap_pdpt_cap: u5 = 7;
-pub const cap_reply_cap: u5 = 8;
-pub const cap_pml4_cap: u5 = 9;
-pub const cap_cnode_cap: u5 = 10;
-pub const cap_asid_control_cap: u5 = 11;
-pub const cap_thread_cap: u5 = 12;
-pub const cap_asid_pool_cap: u5 = 13;
-pub const cap_irq_control_cap: u5 = 14;
-pub const cap_io_space_cap: u5 = 15;
-pub const cap_irq_handler_cap: u5 = 16;
-pub const cap_io_page_table_cap: u5 = 17;
-pub const cap_zombie_cap: u5 = 18;
-pub const cap_io_port_cap: u5 = 19;
-pub const cap_domain_cap: u5 = 20;
-pub const cap_io_port_control_cap: u5 = 31;
-
-test "capability tagged union" {
-    const c = Capability{ .null_cap = {} };
-    try std.testing.expect(!c.isValid());
-    const u: Capability = .{ .untyped = .{ .bits = 1 } };
-    try std.testing.expect(u.isValid());
-    const n: Capability = .{ .notification = .{ .bits = 0 } };
-    try std.testing.expect(n.isValid());
+    return result;
 }
 
-test "cap raw matches seL4 cap_t layout" {
-    try std.testing.expect(@sizeOf(CapRaw) == 16);
-    try std.testing.expect(@alignOf(CapRaw) == 8);
-    const z = CapRaw.nullCap();
-    try std.testing.expectEqual(@as(u5, 0), z.capType());
+pub fn updateData(cap: Capability, preserve: bool, data: u64) error{IllegalOperation}!Capability {
+    var result = cap;
+    switch (result) {
+        .endpoint => |*c| {
+            if (preserve or c.badge != 0) return error.IllegalOperation;
+            c.badge = data;
+        },
+        .notification => |*c| {
+            if (preserve or c.badge != 0) return error.IllegalOperation;
+            c.badge = data;
+        },
+        .cnode => |*c| {
+            const size: u7 = @intCast(data & 63);
+            if (@as(u8, size) + c.radix > 64) return error.IllegalOperation;
+            c.guard_size = size;
+            c.guard = (data >> 6) & s.mask(size);
+        },
+        else => {},
+    }
+    return result;
 }
 
-test "cap tag constants sample" {
-    try std.testing.expectEqual(@as(u5, 0), cap_null_cap);
-    try std.testing.expectEqual(@as(u5, 12), cap_thread_cap);
+pub fn physicalRange(cap: Capability) ?struct { base: usize, size: usize } {
+    return switch (cap) {
+        .untyped => |c| .{ .base = @intFromPtr(c.memory.ptr), .size = c.memory.len },
+        .frame => |c| .{ .base = @intFromPtr(c.memory.ptr), .size = c.memory.len },
+        .endpoint => |c| .{ .base = @intFromPtr(c.object), .size = @sizeOf(s.Endpoint) },
+        .notification => |c| .{ .base = @intFromPtr(c.object), .size = @sizeOf(s.Notification) },
+        .tcb => |c| .{ .base = @intFromPtr(c), .size = @sizeOf(s.Thread) },
+        .cnode => |c| .{ .base = @intFromPtr(c.slots.ptr), .size = c.slots.len * @sizeOf(Slot) },
+        else => null,
+    };
+}
+
+/// Region inclusion is directional for untyped and IRQ-control capabilities.
+pub fn sameRegionAs(a: Capability, b: Capability) bool {
+    if (a == .untyped) {
+        const ar = physicalRange(a).?;
+        const br = physicalRange(b) orelse return false;
+        return br.base >= ar.base and br.size <= ar.size and br.base - ar.base <= ar.size - br.size;
+    }
+    if (a == .irq_control) return b == .irq_control or b == .irq_handler;
+    if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+    return switch (a) {
+        .null_cap => false,
+        .endpoint => |c| c.object == b.endpoint.object,
+        .notification => |c| c.object == b.notification.object,
+        .tcb => |c| c == b.tcb,
+        .cnode => |c| c.slots.ptr == b.cnode.slots.ptr and c.radix == b.cnode.radix,
+        .frame => |c| c.memory.ptr == b.frame.memory.ptr and c.memory.len == b.frame.memory.len,
+        .reply => |c| c.thread == b.reply.thread,
+        .irq_handler => |irq| irq == b.irq_handler,
+        .domain => true,
+        .untyped, .irq_control => unreachable,
+    };
+}
+
+pub fn isRevocable(derived: Capability, source: Capability) bool {
+    if (source == .untyped) return true;
+    return switch (derived) {
+        .endpoint => |c| source == .endpoint and c.badge != source.endpoint.badge,
+        .notification => |c| source == .notification and c.badge != source.notification.badge,
+        .irq_handler => source == .irq_control,
+        else => source == .untyped,
+    };
+}
+
+/// Untyped and IRQ-control caps describe authority, not a finalizable object.
+pub fn sameObjectAs(a: Capability, b: Capability) bool {
+    if (a == .untyped or a == .irq_control) return false;
+    return sameRegionAs(a, b);
 }
