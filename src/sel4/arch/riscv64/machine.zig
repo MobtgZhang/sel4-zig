@@ -1,4 +1,4 @@
-//! 对照外置 `src/arch/riscv/machine/*.c`。
-pub const upstream_rel = "arch/riscv/machine";
-
-pub fn zigSmokeMachineStub() void {}
+//! riscv64 CPU idle primitive; interrupt-controller setup is platform work.
+pub inline fn idle() void {
+    asm volatile ("wfi" ::: .{ .memory = true });
+}
