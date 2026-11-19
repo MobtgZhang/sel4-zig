@@ -1,37 +1,22 @@
-//! 对照 `seL4/src/kernel/boot.c`、`arch/x86/kernel/boot.c`、`arch/x86/kernel/boot_sys.c` 的渐进迁移入口。
-const std = @import("std");
-
+//! Build a usable physical-memory set from a validated boot handoff.
+//! References: src/kernel/boot.c and src/arch/x86/kernel/boot.c.
+const handoff = @import("../boot/handoff.zig");
+const memory = @import("boot_mem.zig");
 pub const upstream_rel = "kernel/boot.c";
 pub const upstream_arch_boot_rel = "arch/x86/kernel/boot.c";
 pub const upstream_boot_sys_rel = "arch/x86/kernel/boot_sys.c";
 
-const handoff = @import("../boot/handoff.zig");
-const serial = @import("../baremetal/serial_plat.zig");
-const boot_mem = @import("boot_mem.zig");
-const hybrid = @import("../hybrid/boot_bridge.zig");
-
-/// 与 `arch/x86/kernel/boot_sys.c` 中早期阶段相当：校验 handoff、演练保留区合并（`boot_mem`），再进入历史 smoke 桩。
-pub fn runMinimalBootPipeline(h: *const handoff.BootHandoff) void {
-    if (h.magic != handoff.magic) return;
-
-    serial.serialWriteSlice("boot: arch_boot + boot_sys (minimal Zig)\r\n");
-
-    var buf: [boot_mem.max_reserved]boot_mem.PRegion = undefined;
-    var n: usize = 0;
-    _ = boot_mem.reserveRegion(&buf, &n, .{ .start = 0x1000, .end = 0x2000 });
-    _ = boot_mem.reserveRegion(&buf, &n, .{ .start = 0x2000, .end = 0x3000 });
-    serial.serialWriteSlice("boot: merge_regions demo n=");
-    var tmp1: [16]u8 = undefined;
-    const line = std.fmt.bufPrint(&tmp1, "{d}\r\n", .{n}) catch "?";
-    serial.serialWriteSlice(line);
-
-    serial.serialWriteSlice("boot: handoff region_count=");
-    var tmp2: [16]u8 = undefined;
-    const line2 = std.fmt.bufPrint(&tmp2, "{d}\r\n", .{h.region_count}) catch "?";
-    serial.serialWriteSlice(line2);
-}
-
-/// 主机单测与兼容：仍调用纯 Zig 桩。
-pub fn zigSmokeBootStub() void {
-    hybrid.callBootStub();
+pub fn usableMemory(h: *const handoff.BootHandoff, reserved: []const memory.PRegion) !memory.RegionSet {
+    if (h.magic != handoff.magic or h.version != 3 or h.region_count > h.regions.len or h.reserved_count > h.reserved.len or h.cpu_count > h.cpu_ids.len) return error.InvalidHandoff;
+    var available: memory.RegionSet = .{};
+    for (h.regions[0..h.region_count]) |region| {
+        if (region.start >= region.end) return error.InvalidRegion;
+        try available.add(.{ .start = region.start, .end = region.end });
+    }
+    for (reserved) |region| try available.subtract(region);
+    for (h.reserved[0..h.reserved_count]) |region| {
+        if (region.start >= region.end) return error.InvalidRegion;
+        try available.subtract(.{ .start = region.start, .end = region.end });
+    }
+    return available;
 }

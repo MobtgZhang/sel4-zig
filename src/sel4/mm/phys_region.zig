@@ -1,12 +1,12 @@
-//! 阶段四 4.2：物理内存区域（UEFI 路径替代 Multiboot mmap 解析的第一版）。
-//! idea1.md 使用 `usize`；此处用 `u64` 表示物理地址，在 x86_64 等与指针同宽的平台上与 `usize` 模型一致。
+//! Physical memory ranges extracted from UEFI conventional-memory descriptors.
+//! Addresses use explicit 64-bit integers across supported targets.
 const std = @import("std");
 const uefi = std.os.uefi;
 
 pub const PhysRegion = struct {
-    /// 物理起始地址（含）
+    /// Inclusive physical start address.
     start: u64,
-    /// 物理结束地址（不含）
+    /// Exclusive physical end address.
     end: u64,
 
     pub fn isEmpty(self: PhysRegion) bool {
@@ -19,30 +19,34 @@ pub const PhysRegion = struct {
     }
 };
 
-/// 从 UEFI 内存映射迭代器中收集 **conventional_memory** 区间写入 `out`，返回写入条数。
-pub fn fromUefiMemoryMapSlice(out: []PhysRegion, slice: uefi.tables.MemoryMapSlice) usize {
+/// Collect conventional-memory regions from firmware-strided descriptors.
+pub fn fromUefiMemoryMapSlice(out: []PhysRegion, slice: uefi.tables.MemoryMapSlice) error{ InvalidMemoryMap, TooManyRegions }!usize {
     var n: usize = 0;
     var it = slice.iterator();
     while (it.next()) |desc| {
         if (desc.type != .conventional_memory) continue;
-        if (n >= out.len) break;
+        if (n >= out.len) return error.TooManyRegions;
         const start = desc.physical_start;
-        const end = start + desc.number_of_pages * 4096;
+        const size = std.math.mul(u64, desc.number_of_pages, 4096) catch return error.InvalidMemoryMap;
+        const end = std.math.add(u64, start, size) catch return error.InvalidMemoryMap;
+        if (size == 0) continue;
         out[n] = .{ .start = start, .end = end };
         n += 1;
     }
     return n;
 }
 
-/// 阶段四 4.2：从 **紧密排列** 的 `MemoryDescriptor` 切片提取 conventional 区域（对应 idea1.md `fromUefiMemoryMap`）。
-/// 若固件 `descriptor_size > @sizeOf(MemoryDescriptor)`，请使用 `fromUefiMemoryMapSlice`。
-pub fn fromUefiMemoryMap(out: []PhysRegion, map: []const uefi.tables.MemoryDescriptor) usize {
+/// Collect regions from a tightly packed descriptor array.
+/// Use fromUefiMemoryMapSlice when the firmware descriptor stride is larger.
+pub fn fromUefiMemoryMap(out: []PhysRegion, map: []const uefi.tables.MemoryDescriptor) error{ InvalidMemoryMap, TooManyRegions }!usize {
     var n: usize = 0;
     for (map) |desc| {
         if (desc.type != .conventional_memory) continue;
-        if (n >= out.len) break;
+        if (n >= out.len) return error.TooManyRegions;
         const start = desc.physical_start;
-        const end = start + desc.number_of_pages * 4096;
+        const size = std.math.mul(u64, desc.number_of_pages, 4096) catch return error.InvalidMemoryMap;
+        const end = std.math.add(u64, start, size) catch return error.InvalidMemoryMap;
+        if (size == 0) continue;
         out[n] = .{ .start = start, .end = end };
         n += 1;
     }
@@ -67,7 +71,7 @@ test "fromUefiMemoryMap tight slice" {
     d1.number_of_pages = 2;
     const map = [_]MD{ d0, d1 };
     var out: [4]PhysRegion = undefined;
-    const n = fromUefiMemoryMap(&out, &map);
+    const n = try fromUefiMemoryMap(&out, &map);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqual(@as(u64, 0x1000), out[0].start);
     try std.testing.expectEqual(@as(u64, 0x1000 + 2 * 4096), out[0].end);
