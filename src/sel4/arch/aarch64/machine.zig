@@ -1,4 +1,4 @@
-//! 对照外置 `src/arch/arm/64/machine/*.c`（GIC、定时器等逐步填充）。
-pub const upstream_rel = "arch/arm/64/machine";
-
-pub fn zigSmokeMachineStub() void {}
+//! aarch64 CPU idle primitive; interrupt-controller setup is platform work.
+pub inline fn idle() void {
+    asm volatile ("wfe" ::: .{ .memory = true });
+}
